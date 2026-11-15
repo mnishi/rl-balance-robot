@@ -100,7 +100,29 @@ def main():
         "Torque [N m]",
         time,
         [
-            (df["torque"], "Gravity torque", "-")
+            (df["gravity_torque"], "Gravity torque", "-")
+        ]
+    )
+
+    # Plot angular momentum
+    save_plot(
+        "evaluation_momentum.png",
+        "Total Angular Momentum",
+        "Angular Momentum [kg m^2/s]",
+        time,
+        [
+            (df["angular_momentum"], "Angular momentum", "-")
+        ]
+    )
+
+    # Plot center of mass tilt
+    save_plot(
+        "evaluation_com_tilt.png",
+        "Center of Mass Tilt",
+        "COM Tilt [deg]",
+        time,
+        [
+            (df["com_tilt_deg"], "COM tilt", "-")
         ]
     )
 
@@ -112,23 +134,8 @@ def main():
         time,
         [
             (df["torque_reward"], "Torque reward", "-"),
-            (df["movement_penalty"], "Movement penalty", "--"),
+            (df["momentum_reward"], "Momentum reward", "--"),
             (df["reward"], "Total reward", "-.")
-        ]
-    )
-
-    # Plot joint movement
-    save_plot(
-        "evaluation_movement.png",
-        "Average Joint Movement",
-        "Mean Angle Change [rad/step]",
-        time,
-        [
-            (
-                df["mean_angle_change"],
-                "Mean joint movement",
-                "-"
-            )
         ]
     )
 

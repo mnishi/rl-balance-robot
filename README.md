@@ -107,14 +107,6 @@ Run commands from the project directory so that `balance.xml` can be found.
 python test_env.py
 ```
 
-To inspect the simulated response to a fixed motor command without PPO:
-
-```bash
-python test_zero_action.py
-```
-
-Despite its filename, `test_zero_action.py` currently applies a small **nonzero** fixed action.
-
 ### Train the PPO agent
 
 ```bash
@@ -164,7 +156,6 @@ The plotting script reads `evaluation.csv` and saves PNG graphs of joint targets
 ├── evaluate_viewer.py       # Interactive MuJoCo visualization
 ├── plot_evaluation.py       # Evaluation plots
 ├── test_env.py              # Basic environment test
-├── test_zero_action.py      # Fixed-action dynamics test
 ├── balance_ppo.zip          # Trained policy checkpoint (when available)
 ├── evaluation.csv           # Generated evaluation data
 └── archive/                 # Optional location for past experiments

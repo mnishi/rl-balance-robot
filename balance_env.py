@@ -1,5 +1,3 @@
-from collections import deque
-
 import gymnasium as gym
 from gymnasium import spaces
 import mujoco
@@ -79,16 +77,6 @@ class BalanceEnv(gym.Env):
         self.total_mass = self.model.body_subtreemass[self.ball]
         self.gravity_force = self.total_mass * self.model.opt.gravity
 
-        # Joint movement penalty settings
-        self.movement_window = 2000
-        self.movement_weight = 0.01
-
-        self.angle_changes = deque(maxlen=self.movement_window)
-        self.angle_change_sum = 0.0
-
-        self.prev_pitch = 0.0
-        self.prev_roll = 0.0
-
     def get_obs(self):
 
         # Upper body orientation
@@ -140,13 +128,6 @@ class BalanceEnv(gym.Env):
 
         self.steps = 0
 
-        # Reset joint movement history
-        self.angle_changes.clear()
-        self.angle_change_sum = 0.0
-
-        self.prev_pitch = float(self.data.qpos[self.pitch_qpos])
-        self.prev_roll = float(self.data.qpos[self.roll_qpos])
-
         return self.get_obs(), {}
 
     def step(self, action):
@@ -165,51 +146,51 @@ class BalanceEnv(gym.Env):
 
         obs = self.get_obs()
 
-        # Calculate gravitational torque around the contact point
+        # Calculate system center of mass
         com_position = self.data.subtree_com[self.ball]
+
+        # Calculate contact point
         ball_position = self.data.xpos[self.ball]
 
-        contact_point = ball_position + np.array([0.0, 0.0, -0.025])
+        contact_point = ball_position + np.array([
+            0.0,
+            0.0,
+            -0.025
+        ])
 
+        # Calculate gravity torque about the contact point
         gravity_torque = np.cross(
             com_position - contact_point,
             self.gravity_force
         )
 
-        # Calculate gravity torque reward
-        torque_error = np.sum(gravity_torque ** 2) / (0.01 ** 2)
-        torque_reward = 1.0 / (1.0 + torque_error)
+        torque_magnitude = np.linalg.norm(gravity_torque)
 
-        # Get actual joint angles
-        pitch = float(self.data.qpos[self.pitch_qpos])
-        roll = float(self.data.qpos[self.roll_qpos])
+        # Gravity torque reward
+        torque_scale = 0.01
 
-        # Calculate actual joint movement
-        angle_change = (
-            abs(pitch - self.prev_pitch)
-            + abs(roll - self.prev_roll)
+        torque_reward = 1.0 / (
+            1.0 + torque_magnitude / torque_scale
         )
 
-        # Update moving average using a running sum
-        if len(self.angle_changes) == self.movement_window:
-            self.angle_change_sum -= self.angle_changes.popleft()
-
-        self.angle_changes.append(angle_change)
-        self.angle_change_sum += angle_change
-
-        mean_angle_change = (
-            self.angle_change_sum / len(self.angle_changes)
+        # Calculate total angular momentum
+        angular_momentum = self.get_total_angular_momentum(
+            contact_point
         )
 
-        # Calculate joint movement penalty
-        movement_penalty = self.movement_weight * mean_angle_change
+        momentum_magnitude = np.linalg.norm(angular_momentum)
 
-        # Calculate total reward
-        reward = torque_reward - movement_penalty
+        # Angular momentum reward
+        momentum_scale = 0.001
 
-        # Update previous joint angles
-        self.prev_pitch = pitch
-        self.prev_roll = roll
+        momentum_reward = 1.0 / (
+            1.0 + (momentum_magnitude / momentum_scale) ** 2
+        )
+
+        # Combined reward
+        reward = torque_reward * (
+            1.0 + 0.5 * momentum_reward
+        )
 
         # Detect falling using foot orientation
         rotation = self.data.xmat[self.foot].reshape(3, 3)
@@ -221,3 +202,61 @@ class BalanceEnv(gym.Env):
         truncated = bool(self.steps >= self.max_steps)
 
         return obs, float(reward), terminated, truncated, {}
+
+    def get_total_angular_momentum(self, contact_point):
+        """Calculate total angular momentum about the contact point."""
+
+        total_momentum = np.zeros(3, dtype=np.float64)
+
+        for body_id in range(1, self.model.nbody):
+
+            mass = self.model.body_mass[body_id]
+
+            if mass <= 0.0:
+                continue
+
+            # Body center of mass
+            com = self.data.xipos[body_id]
+
+            # Spatial velocity in world coordinates
+            velocity = np.zeros(6, dtype=np.float64)
+
+            mujoco.mj_objectVelocity(
+                self.model,
+                self.data,
+                mujoco.mjtObj.mjOBJ_BODY,
+                body_id,
+                velocity,
+                0
+            )
+
+            angular_velocity = velocity[:3]
+            linear_velocity = velocity[3:]
+
+            # Inertia tensor in world coordinates
+            rotation = self.data.ximat[body_id].reshape(3, 3)
+
+            inertia_world = (
+                rotation
+                @ np.diag(self.model.body_inertia[body_id])
+                @ rotation.T
+            )
+
+            # Rotational angular momentum
+            rotational_momentum = (
+                inertia_world @ angular_velocity
+            )
+
+            # Orbital angular momentum
+            r = com - contact_point
+
+            orbital_momentum = np.cross(
+                r,
+                mass * linear_velocity
+            )
+
+            total_momentum += (
+                rotational_momentum + orbital_momentum
+            )
+
+        return total_momentum

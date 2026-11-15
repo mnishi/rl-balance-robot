@@ -1,7 +1,6 @@
 import argparse
 import csv
 
-import mujoco
 import numpy as np
 from stable_baselines3 import PPO
 
@@ -9,31 +8,61 @@ from balance_env import BalanceEnv
 
 
 def calculate_reward_components(env):
+    """Calculate gravity torque and angular momentum rewards."""
 
-    # Calculate gravitational torque
+    # Calculate system center of mass
     com_position = env.data.subtree_com[env.ball]
+
+    # Calculate contact point
     ball_position = env.data.xpos[env.ball]
 
-    contact_point = ball_position + np.array([0.0, 0.0, -0.025])
+    contact_point = ball_position + np.array([
+        0.0, 0.0, -0.025
+    ])
 
+    # Calculate gravity torque
     gravity_torque = np.cross(
         com_position - contact_point,
         env.gravity_force
     )
 
-    # Calculate gravity torque reward
     torque = np.linalg.norm(gravity_torque)
-    torque_error = np.sum(gravity_torque ** 2) / (0.01 ** 2)
-    torque_reward = 1.0 / (1.0 + torque_error)
 
-    # Calculate joint movement penalty
-    mean_angle_change = (
-        env.angle_change_sum / len(env.angle_changes)
+    # Gravity torque reward
+    torque_reward = 1.0 / (
+        1.0 + torque / 0.01
     )
 
-    movement_penalty = env.movement_weight * mean_angle_change
+    # Calculate total angular momentum
+    angular_momentum = env.get_total_angular_momentum(
+        contact_point
+    )
 
-    return torque, torque_reward, mean_angle_change, movement_penalty
+    momentum = np.linalg.norm(angular_momentum)
+
+    # Angular momentum reward
+    momentum_reward = 1.0 / (
+        1.0 + (momentum / 0.001) ** 2
+    )
+
+    # Calculate COM tilt angle
+    com_vector = com_position - contact_point
+
+    horizontal_distance = np.linalg.norm(
+        com_vector[:2]
+    )
+
+    com_tilt_deg = np.degrees(
+        np.arctan2(horizontal_distance, com_vector[2])
+    )
+
+    return (
+        torque,
+        torque_reward,
+        momentum,
+        momentum_reward,
+        com_tilt_deg
+    )
 
 
 def main():
@@ -74,10 +103,11 @@ def main():
             "roll_torque",
             "foot_up",
             "upper_up",
-            "torque",
+            "gravity_torque",
             "torque_reward",
-            "mean_angle_change",
-            "movement_penalty",
+            "angular_momentum",
+            "momentum_reward",
+            "com_tilt_deg",
             "reward"
         ])
 
@@ -88,11 +118,13 @@ def main():
 
             for step in range(env.max_steps):
 
+                # Predict action
                 action, _ = model.predict(
                     obs,
                     deterministic=True
                 )
 
+                # Execute simulation
                 obs, reward, terminated, truncated, info = env.step(
                     action
                 )
@@ -104,8 +136,9 @@ def main():
                 pitch_vel = float(env.data.qvel[env.pitch_dof])
                 roll_vel = float(env.data.qvel[env.roll_dof])
 
-                pitch_target = action[0] * env.max_angle
-                roll_target = action[1] * env.max_angle
+                # Get target angles
+                pitch_target = float(action[0] * env.max_angle)
+                roll_target = float(action[1] * env.max_angle)
 
                 # Get actuator torques
                 pitch_torque = float(
@@ -127,8 +160,9 @@ def main():
                 (
                     torque,
                     torque_reward,
-                    mean_angle_change,
-                    movement_penalty
+                    momentum,
+                    momentum_reward,
+                    com_tilt_deg
                 ) = calculate_reward_components(env)
 
                 total_reward += reward
@@ -149,8 +183,9 @@ def main():
                     upper_up,
                     torque,
                     torque_reward,
-                    mean_angle_change,
-                    movement_penalty,
+                    momentum,
+                    momentum_reward,
+                    com_tilt_deg,
                     reward
                 ])
 
@@ -165,8 +200,10 @@ def main():
                         f"pitch={pitch:.3f}, "
                         f"roll={roll:.3f}, "
                         f"torque={torque:.5f}, "
+                        f"momentum={momentum:.6f}, "
+                        f"com_tilt={com_tilt_deg:.3f}, "
                         f"torque_reward={torque_reward:.5f}, "
-                        f"movement_penalty={movement_penalty:.6f}, "
+                        f"momentum_reward={momentum_reward:.5f}, "
                         f"reward={reward:.5f}"
                     )
 
