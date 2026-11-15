@@ -1,12 +1,24 @@
 import os
+import argparse
 
 from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import CheckpointCallback
 
 from balance_env import BalanceEnv
 
+
+parser = argparse.ArgumentParser()
+parser.add_argument(
+    "timesteps",
+    nargs="?",
+    type=int,
+    default=1_000_000,
+    help="Number of training steps (default: 1000000)"
+)
+args = parser.parse_args()
+
 MODEL_PATH = "balance_ppo"
-TOTAL_TIMESTEPS = 1_000_000
+TOTAL_TIMESTEPS = args.timesteps
 
 env = BalanceEnv()
 
@@ -31,15 +43,18 @@ else:
         n_steps=2048,
         batch_size=64,
         n_epochs=10,
-        gamma=0.99,
+        gamma=0.999,
         gae_lambda=0.95,
+        ent_coef=0.01,
         clip_range=0.2,
         verbose=1,
         tensorboard_log="./logs/"
     )
     reset_num_timesteps = True
 
-# Continue training for 1,000,000 steps
+print(f"Training for {TOTAL_TIMESTEPS:,} steps...")
+
+# Continue training
 model.learn(
     total_timesteps=TOTAL_TIMESTEPS,
     reset_num_timesteps=reset_num_timesteps,

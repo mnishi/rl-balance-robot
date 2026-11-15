@@ -19,10 +19,17 @@ with mujoco.viewer.launch_passive(model, data) as viewer:
 
     while viewer.is_running():
         elapsed = time.time() - start
-
-        data.ctrl[pitch_id] = 0.0 if elapsed < 3.0 else 1.0 
-        data.ctrl[roll_id] = 0.0 if elapsed < 3.0 else 1.0 
-
+        
+        if elapsed < 3.0:
+            target = 0.0
+        elif elapsed < 6.0:
+            target = 0.785
+        else:
+            target = -0.785
+        
+        data.ctrl[pitch_id] = target
+        data.ctrl[roll_id] = target
+       
         mujoco.mj_step(model, data)
         viewer.sync()
 
