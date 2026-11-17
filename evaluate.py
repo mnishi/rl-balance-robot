@@ -1,6 +1,7 @@
 import argparse
 import csv
 
+import mujoco
 import numpy as np
 from stable_baselines3 import PPO
 
@@ -17,7 +18,9 @@ def calculate_reward_components(env):
     ball_position = env.data.xpos[env.ball]
 
     contact_point = ball_position + np.array([
-        0.0, 0.0, -0.025
+        0.0,
+        0.0,
+        -0.02
     ])
 
     # Calculate gravity torque
@@ -73,15 +76,31 @@ def main():
         "model",
         nargs="?",
         default="balance_ppo.zip",
-        help="PPO model file"
+        help="PPO model file or 'zero' for zero-action evaluation"
     )
 
     args = parser.parse_args()
 
     env = BalanceEnv()
-    model = PPO.load(args.model)
 
-    print(f"Loading model: {args.model}")
+    # Load PPO model or select zero-action evaluation
+    if args.model == "zero":
+        model = None
+        print("Evaluation mode: zero action")
+    else:
+        model = PPO.load(args.model)
+        print(f"Loading model: {args.model}")
+
+        # Check observation compatibility
+        model_obs_shape = model.observation_space.shape
+        env_obs_shape = env.observation_space.shape
+
+        if model_obs_shape != env_obs_shape:
+            raise ValueError(
+                f"Observation shape mismatch: "
+                f"model={model_obs_shape}, "
+                f"environment={env_obs_shape}"
+            )
 
     results = []
 
@@ -93,36 +112,47 @@ def main():
         writer.writerow([
             "episode",
             "step",
+
+            "com_x",
+            "com_y",
+            "com_vx",
+            "com_vy",
+
             "pitch",
             "roll",
+
             "pitch_target",
             "roll_target",
-            "pitch_vel",
-            "roll_vel",
+
             "pitch_torque",
             "roll_torque",
-            "foot_up",
-            "upper_up",
+
             "gravity_torque",
             "torque_reward",
+
             "angular_momentum",
             "momentum_reward",
+
             "com_tilt_deg",
+
             "reward"
         ])
 
-        for episode in range(10):
+        for episode in range(100):
 
             obs, info = env.reset()
             total_reward = 0.0
 
             for step in range(env.max_steps):
 
-                # Predict action
-                action, _ = model.predict(
-                    obs,
-                    deterministic=True
-                )
+                # Predict action or use zero action
+                if model is None:
+                    action = np.zeros(2, dtype=np.float32)
+                else:
+                    action, _ = model.predict(
+                        obs,
+                        deterministic=True
+                    )
 
                 # Execute simulation
                 obs, reward, terminated, truncated, info = env.step(
@@ -130,15 +160,22 @@ def main():
                 )
 
                 # Get joint states
-                pitch = float(env.data.qpos[env.pitch_qpos])
-                roll = float(env.data.qpos[env.roll_qpos])
+                pitch = float(
+                    env.data.qpos[env.pitch_qpos]
+                )
 
-                pitch_vel = float(env.data.qvel[env.pitch_dof])
-                roll_vel = float(env.data.qvel[env.roll_dof])
+                roll = float(
+                    env.data.qpos[env.roll_qpos]
+                )
 
                 # Get target angles
-                pitch_target = float(action[0] * env.max_angle)
-                roll_target = float(action[1] * env.max_angle)
+                pitch_target = float(
+                    action[0] * env.max_angle
+                )
+
+                roll_target = float(
+                    action[1] * env.max_angle
+                )
 
                 # Get actuator torques
                 pitch_torque = float(
@@ -149,14 +186,7 @@ def main():
                     env.data.actuator_force[env.roll_motor]
                 )
 
-                # Get body orientations
-                foot_rotation = env.data.xmat[env.foot].reshape(3, 3)
-                upper_rotation = env.data.xmat[env.upper_body].reshape(3, 3)
-
-                foot_up = float(foot_rotation[2, 2])
-                upper_up = float(upper_rotation[2, 2])
-
-                # Get reward components
+                # Calculate reward components
                 (
                     torque,
                     torque_reward,
@@ -167,44 +197,56 @@ def main():
 
                 total_reward += reward
 
+                # Use the same COM state as the training environment
+                com_x, com_y, com_vx, com_vy = map(
+                    float,
+                    obs[:4]
+                )
+
+                # Get joint angles from observation
+                pitch = float(obs[4])
+                roll = float(obs[5])
+
                 # Record evaluation data
                 writer.writerow([
                     episode + 1,
                     step,
+
+                    com_x,
+                    com_y,
+                    com_vx,
+                    com_vy,
+
                     pitch,
                     roll,
+
                     pitch_target,
                     roll_target,
-                    pitch_vel,
-                    roll_vel,
+
                     pitch_torque,
                     roll_torque,
-                    foot_up,
-                    upper_up,
+
                     torque,
                     torque_reward,
+
                     momentum,
                     momentum_reward,
+
                     com_tilt_deg,
+
                     reward
                 ])
 
-                # Print evaluation log
-                if step % 20 == 0:
-
+                # Print reward components every 10 steps
+                if env.steps <= 200 and env.steps % 10 == 0:
                     print(
                         f"Episode={episode + 1}, "
-                        f"step={step:4d}, "
-                        f"foot_up={foot_up:.3f}, "
-                        f"upper_up={upper_up:.3f}, "
-                        f"pitch={pitch:.3f}, "
-                        f"roll={roll:.3f}, "
-                        f"torque={torque:.5f}, "
-                        f"momentum={momentum:.6f}, "
-                        f"com_tilt={com_tilt_deg:.3f}, "
-                        f"torque_reward={torque_reward:.5f}, "
-                        f"momentum_reward={momentum_reward:.5f}, "
-                        f"reward={reward:.5f}"
+                        f"Step={env.steps:4d}, "
+                        f"Torque={torque:.6f} N*m, "
+                        f"Momentum={momentum:.8f} kg*m^2/s, "
+                        f"TorqueReward={torque_reward:.4f}, "
+                        f"MomentumReward={momentum_reward:.4f}, "
+                        f"Reward={reward:.4f}"
                     )
 
                 if terminated or truncated:
@@ -221,9 +263,20 @@ def main():
 
     print("\n===== Evaluation Results =====")
 
-    print(f"Average survival: {np.mean(results):.1f} steps")
-    print(f"Maximum survival: {np.max(results)} steps")
-    print(f"Minimum survival: {np.min(results)} steps")
+    print(
+        f"Average survival: "
+        f"{np.mean(results):.1f} steps"
+    )
+
+    print(
+        f"Maximum survival: "
+        f"{np.max(results)} steps"
+    )
+
+    print(
+        f"Minimum survival: "
+        f"{np.min(results)} steps"
+    )
 
     print(
         f"{env.max_steps}-step completion: "

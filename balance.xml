@@ -46,30 +46,30 @@
             rgba="0.8 0.8 0.8 1"/>
 
         <!-- 球：地面との接触・自由運動 -->
-        <body name="ball" pos="0 0 0.025">
+        <body name="ball" pos="0 0 0.02">
 
             <freejoint name="ball_free"/>
 
             <geom name="ball_geom"
                   type="sphere"
-                  size="0.025"
-                  mass="0.3"
+                  size="0.02"
+                  mass="0.02"
                   friction="1.0 0.005 0.0001"
                   rgba="0.3 0.3 0.3 1"/>
 
               <!-- 足：球に剛体固定 -->
             <body name="foot" pos="0 0 0">
 
-                <!-- 脚部 -->
+                <!-- Leg: ball center (2 cm) to pitch axis (15 cm above ground) -->
                 <geom name="leg_geom"
                     type="cylinder"
-                    fromto="0 0 0 0 0 0.1"
-                    size="0.025"
-                    mass="0.05"
+                    fromto="0 0 0 0 0 0.13"
+                    size="0.005"
+                    mass="0.025"
                     rgba="0.2 0.2 0.2 1"/>
 
                 <!-- ピッチ軸 -->
-                <body name="pitch_frame" pos="0 0 0.1">
+                <body name="pitch_frame" pos="0 0 0.13">
 
                     <joint name="pitch"
                         type="hinge"
@@ -80,21 +80,21 @@
 
                     <geom name="pitch_axis_geom"
                         type="cylinder"
-                        size="0.04 0.04"
-                        pos="0 -0.025 0"
+                        size="0.01 0.015"
+                        pos="0 0 0"
                         euler="90 0 0"
-                        mass="0.021"
+                        mass="0.02"
                         rgba="0.5 0.5 0.5 1"/>
 
                     <geom name="pitch_support_geom"
                         type="cylinder"
-                        size="0.025 0.03"
-                        pos="0 0 0.05"
-                        mass="0.005"
+                        size="0.005 0.02"
+                        pos="0 0 0.025"
+                        mass="0.025"
                         rgba="0.5 0.5 0.5 1"/>
 
                     <!-- ロール軸 -->
-                    <body name="roll_frame" pos="0 0 0.1">
+                    <body name="roll_frame" pos="0 0 0.04">
 
                         <joint name="roll"
                             type="hinge"
@@ -105,27 +105,27 @@
 
                         <geom name="roll_axis_geom"
                             type="cylinder"
-                            size="0.04 0.04"
-                            pos="-0.025 0 0"
+                            size="0.01 0.015"
+                            pos="0 0 0"
                             euler="0 90 0"
-                            mass="0.021"
+                            mass="0.02"
                             rgba="0.5 0.5 0.5 1"/>
 
-                        <!-- 上位構造 -->
-                        <body name="upper_body" pos="0 0 0.04">
+                        <!-- Upper assembly: 50 g total; top at 25 cm above ground -->
+                        <body name="upper_body" pos="0 0 0">
         
                             <geom name="upper_support_geom"
                                 type="cylinder"
-                                size="0.025 0.15"
-                                pos="0 0 0.1"
+                                size="0.005 0.02"
+                                pos="0 0 0.02"
                                 mass="0.005"
                                 rgba="0.5 0.5 0.5 1"/>
 
                             <geom name="upper_geom"
                                   type="cylinder"
-                                  size="0.04 0.05"
-                                  pos="0 0 0.25"
-                                  mass="0.05"
+                                  size="0.015 0.02"
+                                  pos="0 0 0.04"
+                                  mass="0.045"
                                   rgba="0.2 0.5 0.8 1"/>
 
                         </body>

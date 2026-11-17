@@ -5,7 +5,6 @@ import numpy as np
 
 
 class BalanceEnv(gym.Env):
-
     def __init__(self):
         super().__init__()
 
@@ -14,29 +13,47 @@ class BalanceEnv(gym.Env):
 
         # Body IDs
         self.ball = mujoco.mj_name2id(
-            self.model, mujoco.mjtObj.mjOBJ_BODY, "ball"
+            self.model,
+            mujoco.mjtObj.mjOBJ_BODY,
+            "ball"
         )
+
         self.foot = mujoco.mj_name2id(
-            self.model, mujoco.mjtObj.mjOBJ_BODY, "foot"
+            self.model,
+            mujoco.mjtObj.mjOBJ_BODY,
+            "foot"
         )
+
         self.upper_body = mujoco.mj_name2id(
-            self.model, mujoco.mjtObj.mjOBJ_BODY, "upper_body"
+            self.model,
+            mujoco.mjtObj.mjOBJ_BODY,
+            "upper_body"
         )
 
         # Joint IDs
         pitch_joint = mujoco.mj_name2id(
-            self.model, mujoco.mjtObj.mjOBJ_JOINT, "pitch"
+            self.model,
+            mujoco.mjtObj.mjOBJ_JOINT,
+            "pitch"
         )
+
         roll_joint = mujoco.mj_name2id(
-            self.model, mujoco.mjtObj.mjOBJ_JOINT, "roll"
+            self.model,
+            mujoco.mjtObj.mjOBJ_JOINT,
+            "roll"
         )
 
         # Actuator IDs
         self.pitch_motor = mujoco.mj_name2id(
-            self.model, mujoco.mjtObj.mjOBJ_ACTUATOR, "pitch_motor"
+            self.model,
+            mujoco.mjtObj.mjOBJ_ACTUATOR,
+            "pitch_motor"
         )
+
         self.roll_motor = mujoco.mj_name2id(
-            self.model, mujoco.mjtObj.mjOBJ_ACTUATOR, "roll_motor"
+            self.model,
+            mujoco.mjtObj.mjOBJ_ACTUATOR,
+            "roll_motor"
         )
 
         # Joint addresses
@@ -46,7 +63,7 @@ class BalanceEnv(gym.Env):
         self.pitch_dof = self.model.jnt_dofadr[pitch_joint]
         self.roll_dof = self.model.jnt_dofadr[roll_joint]
 
-        # Action space: normalized pitch and roll target angles
+        # Action space
         self.action_space = spaces.Box(
             low=-1.0,
             high=1.0,
@@ -54,172 +71,238 @@ class BalanceEnv(gym.Env):
             dtype=np.float32
         )
 
-        # Observation space:
-        # Upper body orientation (3)
-        # Upper body angular velocity (3)
-        # Joint angles (2)
-        # Joint velocities (2)
-        # Ball angular velocity (3)
+        # Observation:
+        # COM x
+        # COM y
+        # COM vx
+        # COM vy
+        # pitch
+        # roll
         self.observation_space = spaces.Box(
             low=-np.inf,
             high=np.inf,
-            shape=(13,),
+            shape=(6,),
             dtype=np.float32
         )
 
         # Simulation settings
-        self.max_angle = np.deg2rad(30.0)
+        self.max_angle = np.deg2rad(45.0)
         self.frame_skip = 5
         self.max_steps = 2000
         self.steps = 0
 
         # Gravity torque settings
         self.total_mass = self.model.body_subtreemass[self.ball]
-        self.gravity_force = self.total_mass * self.model.opt.gravity
+        self.gravity_force = (
+            self.total_mass * self.model.opt.gravity
+        )
 
     def get_obs(self):
+        com_position = self.data.subtree_com[self.ball]
 
-        # Upper body orientation
-        rotation = self.data.xmat[self.upper_body].reshape(3, 3)
-        up = rotation[:, 2]
+        ball_position = self.data.xpos[self.ball]
 
-        # Upper body angular velocity
-        angular_velocity = self.data.cvel[self.upper_body][:3]
+        contact_point = ball_position + np.array([
+            0.0,
+            0.0,
+            -0.02
+        ])
 
-        # Joint states
+        com_offset = (
+            com_position[:2]
+            - contact_point[:2]
+        )
+
+        # COM velocity relative to the ball center
+        if self.prev_com_offset is None:
+            com_velocity = np.zeros(2)
+        else:
+            dt = self.model.opt.timestep * self.frame_skip
+
+            com_velocity = (
+                com_offset - self.prev_com_offset
+            ) / dt
+
+        self.prev_com_offset = com_offset.copy()    
+
         pitch = self.data.qpos[self.pitch_qpos]
         roll = self.data.qpos[self.roll_qpos]
 
-        pitch_vel = self.data.qvel[self.pitch_dof]
-        roll_vel = self.data.qvel[self.roll_dof]
+        obs = np.array([
+            com_offset[0],
+            com_offset[1],
+            com_velocity[0],
+            com_velocity[1],
+            pitch,
+            roll,
+        ], dtype=np.float32)
 
-        # Ball angular velocity
-        ball_angular_velocity = self.data.qvel[3:6]
-
-        obs = np.concatenate([
-            up,
-            angular_velocity,
-            [pitch, roll],
-            [pitch_vel, roll_vel],
-            ball_angular_velocity
-        ])
-
-        return obs.astype(np.float32)
+        return obs
 
     def reset(self, seed=None, options=None):
-
         super().reset(seed=seed)
 
-        mujoco.mj_resetData(self.model, self.data)
+        mujoco.mj_resetData(
+            self.model,
+            self.data
+        )
 
         # Randomize initial joint angles
-        self.data.qpos[self.pitch_qpos] = self.np_random.uniform(
-            -0.03, 0.03
+        self.data.qpos[self.pitch_qpos] = (
+            self.np_random.uniform(
+                -0.08,
+                0.08
+            )
         )
-        self.data.qpos[self.roll_qpos] = self.np_random.uniform(
-            -0.03, 0.03
+
+        self.data.qpos[self.roll_qpos] = (
+            self.np_random.uniform(
+                -0.08,
+                0.08
+            )
         )
 
         # Reset actuator targets
         self.data.ctrl[self.pitch_motor] = 0.0
         self.data.ctrl[self.roll_motor] = 0.0
 
-        mujoco.mj_forward(self.model, self.data)
+        mujoco.mj_forward(
+            self.model,
+            self.data
+        )
 
         self.steps = 0
+
+        # Initialize previous COM offset
+        self.prev_com_offset = None
 
         return self.get_obs(), {}
 
     def step(self, action):
+        action = np.clip(
+            action,
+            -1.0,
+            1.0
+        )
 
-        action = np.clip(action, -1.0, 1.0)
+        self.data.ctrl[self.pitch_motor] = (
+            action[0] * self.max_angle
+        )
 
-        # Convert normalized actions to target angles
-        self.data.ctrl[self.pitch_motor] = action[0] * self.max_angle
-        self.data.ctrl[self.roll_motor] = action[1] * self.max_angle
+        self.data.ctrl[self.roll_motor] = (
+            action[1] * self.max_angle
+        )
 
-        # Advance simulation
         for _ in range(self.frame_skip):
-            mujoco.mj_step(self.model, self.data)
+            mujoco.mj_step(
+                self.model,
+                self.data
+            )
 
         self.steps += 1
 
         obs = self.get_obs()
 
-        # Calculate system center of mass
         com_position = self.data.subtree_com[self.ball]
 
-        # Calculate contact point
         ball_position = self.data.xpos[self.ball]
 
         contact_point = ball_position + np.array([
             0.0,
             0.0,
-            -0.025
+            -0.02
         ])
 
-        # Calculate gravity torque about the contact point
         gravity_torque = np.cross(
             com_position - contact_point,
             self.gravity_force
         )
 
-        torque_magnitude = np.linalg.norm(gravity_torque)
+        torque_magnitude = np.linalg.norm(
+            gravity_torque
+        )
 
-        # Gravity torque reward
         torque_scale = 0.01
 
         torque_reward = 1.0 / (
-            1.0 + torque_magnitude / torque_scale
+            1.0 +
+            torque_magnitude / torque_scale
         )
 
-        # Calculate total angular momentum
-        angular_momentum = self.get_total_angular_momentum(
-            contact_point
+        angular_momentum = (
+            self.get_total_angular_momentum(
+                contact_point
+            )
         )
 
-        momentum_magnitude = np.linalg.norm(angular_momentum)
+        momentum_magnitude = np.linalg.norm(
+            angular_momentum
+        )
 
-        # Angular momentum reward
         momentum_scale = 0.001
 
         momentum_reward = 1.0 / (
-            1.0 + (momentum_magnitude / momentum_scale) ** 2
+            1.0 +
+            (momentum_magnitude /
+             momentum_scale) ** 2
         )
 
-        # Combined reward
-        reward = torque_reward * (
-            1.0 + 0.5 * momentum_reward
+        #reward = torque_reward * (
+        #    1.0 +
+        #    0.5 * momentum_reward
+        #)
+
+        reward = torque_reward * momentum_reward
+        
+        com_offset = np.linalg.norm(
+            com_position[:2]
+            - contact_point[:2]
         )
 
-        # Detect falling using foot orientation
-        rotation = self.data.xmat[self.foot].reshape(3, 3)
-        foot_up = rotation[:, 2]
+        terminated = bool(
+            com_offset > 0.1
+        )
 
-        terminated = bool(foot_up[2] < 0.707)
+        truncated = bool(
+            self.steps >= self.max_steps
+        )
 
-        # Check episode time limit
-        truncated = bool(self.steps >= self.max_steps)
+        return (
+            obs,
+            float(reward),
+            terminated,
+            truncated,
+            {}
+        )
 
-        return obs, float(reward), terminated, truncated, {}
+    def get_total_angular_momentum(
+        self,
+        contact_point
+    ):
+        total_momentum = np.zeros(
+            3,
+            dtype=np.float64
+        )
 
-    def get_total_angular_momentum(self, contact_point):
-        """Calculate total angular momentum about the contact point."""
-
-        total_momentum = np.zeros(3, dtype=np.float64)
-
-        for body_id in range(1, self.model.nbody):
-
-            mass = self.model.body_mass[body_id]
+        for body_id in range(
+            1,
+            self.model.nbody
+        ):
+            mass = self.model.body_mass[
+                body_id
+            ]
 
             if mass <= 0.0:
                 continue
 
-            # Body center of mass
-            com = self.data.xipos[body_id]
+            com = self.data.xipos[
+                body_id
+            ]
 
-            # Spatial velocity in world coordinates
-            velocity = np.zeros(6, dtype=np.float64)
+            velocity = np.zeros(
+                6,
+                dtype=np.float64
+            )
 
             mujoco.mj_objectVelocity(
                 self.model,
@@ -233,21 +316,26 @@ class BalanceEnv(gym.Env):
             angular_velocity = velocity[:3]
             linear_velocity = velocity[3:]
 
-            # Inertia tensor in world coordinates
-            rotation = self.data.ximat[body_id].reshape(3, 3)
+            rotation = (
+                self.data.ximat[body_id]
+                .reshape(3, 3)
+            )
 
             inertia_world = (
                 rotation
-                @ np.diag(self.model.body_inertia[body_id])
+                @ np.diag(
+                    self.model.body_inertia[
+                        body_id
+                    ]
+                )
                 @ rotation.T
             )
 
-            # Rotational angular momentum
             rotational_momentum = (
-                inertia_world @ angular_velocity
+                inertia_world
+                @ angular_velocity
             )
 
-            # Orbital angular momentum
             r = com - contact_point
 
             orbital_momentum = np.cross(
@@ -256,7 +344,8 @@ class BalanceEnv(gym.Env):
             )
 
             total_momentum += (
-                rotational_momentum + orbital_momentum
+                rotational_momentum
+                + orbital_momentum
             )
 
         return total_momentum

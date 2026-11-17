@@ -45,7 +45,7 @@ else:
         n_epochs=10,
         gamma=0.999,
         gae_lambda=0.95,
-        ent_coef=0.01,
+        ent_coef=0.0,
         clip_range=0.2,
         verbose=1,
         tensorboard_log="./logs/"

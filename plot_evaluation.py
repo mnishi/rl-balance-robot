@@ -1,4 +1,5 @@
 import argparse
+from pathlib import Path
 
 import matplotlib
 matplotlib.use("Agg")
@@ -60,7 +61,9 @@ def main():
 
     # Simulation time: timestep=0.002, frame_skip=5
     dt = 0.01
-    time = df["step"].to_numpy() * dt
+
+    # CSV step starts at zero
+    time = (df["step"].to_numpy() + 1) * dt
 
     # Convert joint angles to degrees
     pitch = np.degrees(df["pitch"])
@@ -68,6 +71,14 @@ def main():
 
     pitch_target = np.degrees(df["pitch_target"])
     roll_target = np.degrees(df["roll_target"])
+
+    # Convert COM position to millimeters
+    com_x = df["com_x"] * 1000.0
+    com_y = df["com_y"] * 1000.0
+
+    # COM relative velocity
+    com_vx = df["com_vx"]
+    com_vy = df["com_vy"]
 
     # Plot pitch angle
     save_plot(
@@ -90,6 +101,42 @@ def main():
         [
             (roll, "Actual", "-"),
             (roll_target, "Target", "--")
+        ]
+    )
+
+    # Plot COM position
+    save_plot(
+        "evaluation_com_position.png",
+        "COM Position Relative to Ball Center",
+        "COM Position [mm]",
+        time,
+        [
+            (com_x, "COM X", "-"),
+            (com_y, "COM Y", "--")
+        ]
+    )
+
+    # Plot COM velocity
+    save_plot(
+        "evaluation_com_velocity.png",
+        "COM Velocity Relative to Ball Center",
+        "COM Velocity [m/s]",
+        time,
+        [
+            (com_vx, "COM Vx", "-"),
+            (com_vy, "COM Vy", "--")
+        ]
+    )
+
+    # Plot actuator torques
+    save_plot(
+        "evaluation_actuator_torque.png",
+        "Actuator Torques",
+        "Torque [N m]",
+        time,
+        [
+            (df["pitch_torque"], "Pitch torque", "-"),
+            (df["roll_torque"], "Roll torque", "--")
         ]
     )
 
