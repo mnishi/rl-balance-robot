@@ -3,138 +3,97 @@
     <compiler angle="degree" autolimits="true"/>
 
     <option timestep="0.002"
-            gravity="0 0 -9.81"
-            integrator="implicitfast"/>
+        gravity="0 0 -9.81"
+        integrator="implicitfast"/>
 
     <default>
         <joint damping="0.1" armature="0.001"/>
         <geom friction="1.0 0.005 0.0001"
-              condim="3"/>
+            condim="3"/>
     </default>
 
     <actuator>
-        <position name="pitch_motor"
-            joint="pitch"
-            kp="2"
-            kv="0.05"
-            forcelimited="true"
-            forcerange="-0.49 0.49"
-            ctrlrange="-1.3963 1.3963"
-            ctrllimited="true"/>
-
         <position name="roll_motor"
             joint="roll"
             kp="2"
-            kv="0.05"
+            kv="0.1"
             forcelimited="true"
-            forcerange="-0.49 0.49"
+            forcerange="-5.0 5.0"
             ctrlrange="-1.3963 1.3963"
             ctrllimited="true"/>
     </actuator>
 
     <worldbody>
 
-        <!-- 照明 -->
         <light pos="0 0 2"
             dir="0 0 -1"/>
 
-        <!-- 地面 -->
         <geom name="ground"
             type="plane"
             pos="0 0 0"
             size="3 3 0.1"
             rgba="0.8 0.8 0.8 1"/>
 
-        <!-- 球：地面との接触・自由運動 -->
-        <body name="ball" pos="0 0 0.02">
+        <body name="ball" pos="0 0 0.0">
 
             <freejoint name="ball_free"/>
 
             <geom name="ball_geom"
-                  type="sphere"
-                  size="0.02"
-                  mass="0.02"
-                  friction="1.0 0.005 0.0001"
-                  rgba="0.3 0.3 0.3 1"/>
+                type="cylinder"
+                size="0.02 0.05"
+                euler="0 90 0"
+                mass="0.04"
+                friction="1.0 0.005 0.0001"
+                rgba="0.3 0.3 0.3 1"/>
 
-              <!-- 足：球に剛体固定 -->
             <body name="foot" pos="0 0 0">
 
-                <!-- Leg: ball center (2 cm) to pitch axis (15 cm above ground) -->
                 <geom name="leg_geom"
                     type="cylinder"
-                    fromto="0 0 0 0 0 0.13"
-                    size="0.005"
-                    mass="0.025"
+                    pos="0 0 0.05"
+                    size="0.005 0.05"
+                    mass="0.020"
                     rgba="0.2 0.2 0.2 1"/>
 
-                <!-- ピッチ軸 -->
-                <body name="pitch_frame" pos="0 0 0.13">
+                <body name="roll_frame" pos="0 0 0.1">
 
-                    <joint name="pitch"
+                    <joint name="roll"
                         type="hinge"
-                        axis="0 1 0"
+                        axis="1 0 0"
                         limited="true"
                         range="-80 80"
                         damping="0.1"/>
 
-                    <geom name="pitch_axis_geom"
+                    <geom name="roll_axis_geom"
                         type="cylinder"
                         size="0.01 0.015"
                         pos="0 0 0"
-                        euler="90 0 0"
-                        mass="0.02"
+                        euler="0 90 0"
+                        mass="0.040"
                         rgba="0.5 0.5 0.5 1"/>
 
-                    <geom name="pitch_support_geom"
-                        type="cylinder"
-                        size="0.005 0.02"
-                        pos="0 0 0.025"
-                        mass="0.025"
-                        rgba="0.5 0.5 0.5 1"/>
+                    <body name="upper_body" pos="0 0 0">
 
-                    <!-- ロール軸 -->
-                    <body name="roll_frame" pos="0 0 0.04">
-
-                        <joint name="roll"
-                            type="hinge"
-                            axis="1 0 0"
-                            limited="true"
-                            range="-80 80"
-                            damping="0.1"/>
-
-                        <geom name="roll_axis_geom"
+                        <geom name="upper_support_geom"
                             type="cylinder"
-                            size="0.01 0.015"
-                            pos="0 0 0"
-                            euler="0 90 0"
-                            mass="0.02"
+                            size="0.005 0.075"
+                            pos="0 0 0.075"
+                            mass="0.010"
                             rgba="0.5 0.5 0.5 1"/>
 
-                        <!-- Upper assembly: 50 g total; top at 25 cm above ground -->
-                        <body name="upper_body" pos="0 0 0">
-        
-                            <geom name="upper_support_geom"
-                                type="cylinder"
-                                size="0.005 0.02"
-                                pos="0 0 0.02"
-                                mass="0.005"
-                                rgba="0.5 0.5 0.5 1"/>
-
-                            <geom name="upper_geom"
-                                  type="cylinder"
-                                  size="0.015 0.02"
-                                  pos="0 0 0.04"
-                                  mass="0.045"
-                                  rgba="0.2 0.5 0.8 1"/>
-
-                        </body>
+                        <geom name="upper_geom"
+                            type="cylinder"
+                            size="0.015 0.02"
+                            pos="0 0 0.15"
+                            mass="0.040"
+                            rgba="0.2 0.5 0.8 1"/>
 
                     </body>
 
                 </body>
 
             </body>
+
         </body>
 
     </worldbody>

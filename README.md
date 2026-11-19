@@ -1,92 +1,108 @@
-# Reinforcement Learning for a Single-Contact Balance Robot
+# Reinforcement Learning for a 1-DOF Balance Robot
 
-This project explores reinforcement learning for balancing an intentionally unstable robot in MuJoCo. The robot rests on a spherical contact point and uses two actuated joints (pitch and roll) to reposition its upper structure and maintain balance.
+This project investigates reinforcement learning for balancing an intentionally unstable robot in MuJoCo. The current experiment uses a **cylindrical ground-contact element** and **one actuated roll joint**. The aim is to learn dynamic balance by reducing both the gravitational moment about an estimated contact point and the system's angular momentum.
 
-The objective is to investigate whether a PPO policy can learn dynamic balance by minimizing the gravitational moment about the ground-contact point, rather than relying solely on a conventional upright-angle reward.
-
-> **Status:** Experimental research project. Stable long-duration balancing has not yet been demonstrated consistently, and the simulation is not a validated representation of physical hardware.
+> **Status:** Experimental research project. Consistent long-duration balancing has not yet been demonstrated. The simulation has not been validated against physical hardware.
 
 ## Robot and Simulation
 
 The MuJoCo model is defined in `balance.xml` and includes:
 
-- A spherical ground-contact element (`ball`)
+- A cylindrical ground-contact element (`ball`) with a free joint, allowing translation and rotation in the simulated world
 - A rigid supporting structure (`foot`)
-- Two serially arranged, actuated joints (`pitch` and `roll`)
+- One actuated hinge joint (`roll`) about the X axis
 - An upper structure (`upper_body`) with an intentionally asymmetric mass distribution
 
-The asymmetric design creates a nontrivial equilibrium posture and makes the balancing problem more representative of imperfect physical construction.
+**1-DOF refers to the number of controlled joints, not the number of physical degrees of freedom.** Because the contact body has a free joint, the robot can still translate, rotate, or lose contact with the ground.
 
-The current simulation configuration uses a MuJoCo physics timestep of **2 ms** and executes **five physics steps per environment action**, giving a **10 ms control interval**. Episodes are limited to **2,000 control steps (20 seconds)** unless terminated earlier.
+The physics timestep is **0.002 s (2 ms)**. The environment advances **five physics steps per policy action**, giving a **0.010 s (10 ms) control interval**. An episode is truncated at **2,000 policy steps (20 seconds)** unless it terminates earlier.
 
 ## Reinforcement Learning
 
-The environment is implemented with Gymnasium and MuJoCo, and the agent is trained using **Proximal Policy Optimization (PPO)** from Stable-Baselines3.
+The environment is implemented with Gymnasium and MuJoCo. The policy is trained with **Proximal Policy Optimization (PPO)** from Stable-Baselines3.
 
 ### Observation Space
 
-The policy receives a 13-dimensional observation vector:
+The policy receives a **3-dimensional** observation vector:
 
-| Quantity | Dimensions |
-| --- | ---: |
-| Upper-body local Z axis expressed in world coordinates | 3 |
-| Upper-body angular velocity | 3 |
-| Pitch and roll joint angles | 2 |
-| Pitch and roll joint velocities | 2 |
-| Ball angular velocity | 3 |
-| **Total** | **13** |
+| Quantity | Dimensions | Description |
+| --- | ---: | --- |
+| COM Y offset | 1 | Combined robot center of mass minus estimated contact point, along world Y |
+| COM Y offset velocity | 1 | Finite-difference rate of change of that offset |
+| Roll joint angle | 1 | Relative angle of the actuated roll joint, in radians |
+| **Total** | **3** | |
+
+The observation does **not** currently include global robot displacement, roll joint velocity, or the base's absolute orientation. These omissions may limit the policy's ability to infer the full physical state.
 
 ### Action Space
 
-The policy outputs two normalized actions in the range `[-1, 1]`, corresponding to pitch and roll joint position targets. Each action is scaled to a target angle within **±30°**.
+The policy outputs **one normalized action** in `[-1, 1]`. The environment converts it to a roll-joint **position target**:
+
+```text
+roll_target = action[0] * radians(80)
+```
+
+The actuator is position-controlled. The MuJoCo model should have compatible joint limits and actuator control limits; consult `balance.xml` for the exact actuator gains and torque limits.
 
 ### Reward Function
 
-The main reward encourages the robot to reduce the gravitational torque about an estimated ground-contact point.
+The reward combines a measure of static gravitational balance with a measure of dynamic motion.
 
-Let:
-
-- **c** be the combined center of mass of the robot,
-- **p** be the estimated contact point,
-- **m** be the total mass, and
-- **g** be the gravity vector.
-
-The gravitational torque is calculated as:
+Let `c` be the combined center of mass, `p` the estimated contact point, `m` the combined mass, and `g` the gravity vector. The gravity-induced moment is:
 
 ```text
 tau = (c - p) × (m * g)
 ```
 
-The torque-based reward is:
+Only the **X component**, corresponding to the controlled roll direction, is evaluated:
 
 ```text
-R_torque = 1 / (1 + ||tau||² / 0.01²)
+R_torque = 1 / (1 + abs(tau_x) / 0.01)
 ```
 
-A small penalty discourages unnecessary joint movement:
+The total angular momentum `H` about the estimated contact point includes both each body's rotational angular momentum and its orbital contribution. Again, only the X component is evaluated:
 
 ```text
-R = R_torque - 0.01 * mean_joint_angle_change
+R_momentum = 1 / (1 + (abs(H_x) / 0.001)^2)
 ```
 
-Here, `mean_joint_angle_change` is the running mean of the sum of absolute pitch and roll angle changes, using a window of up to 2,000 environment steps.
+The combined per-step reward is:
 
-**Important:** Minimizing gravitational torque is not equivalent to guaranteeing dynamic stability. Angular momentum, contact dynamics, actuator limits, and delayed responses can still cause the robot to fall.
+```text
+R = R_torque * R_momentum
+```
+
+The contact point is currently **approximated** as a point one cylinder radius (0.02 m) below the `ball` body origin. This is not a measured MuJoCo contact location; it may become inaccurate when the cylinder tilts, moves, or leaves the ground.
+
+> Minimizing gravitational moment and angular momentum does not guarantee dynamic stability. Contact dynamics, actuator saturation, partial observability, and recovery from perturbations still matter.
 
 ### Episode Termination
 
-An episode terminates when the supporting structure tilts beyond the configured threshold (the world-frame Z component of the foot's local Z axis falls below approximately `0.707`). An episode is truncated after 2,000 control steps.
+The current environment terminates an episode when **any** of the following conditions is met:
+
+| Condition | Threshold |
+| --- | --- |
+| Absolute COM Y offset from the estimated contact point | Greater than **0.05 m** (5 cm) |
+| Supporting structure (`foot`) tilt from world vertical | Greater than **80°** |
+| Height of the `upper_body` body origin above the world ground plane | **0.05 m** (5 cm) or lower |
+| Horizontal displacement of the `ball` body origin from its position at reset | Greater than **0.03 m** (3 cm), measured in world XY |
+
+The last condition is part of the intended latest environment update; verify that it is present in your local `balance_env.py`. It requires storing the initial XY position during `reset()` and comparing it with the current XY position in `step()`.
+
+The height condition uses the **body origin**, not necessarily the upper mass's center or its lowest surface. The movement condition terminates an episode; it does not physically constrain the robot to remain stationary.
+
+An episode is **truncated** when it reaches **2,000 policy steps**.
 
 ## Requirements
 
 - Python 3 and a virtual environment
-- MuJoCo Python package
-- Gymnasium
-- Stable-Baselines3
-- NumPy
-- pandas and Matplotlib (for evaluation plots)
+- MuJoCo (`mujoco`)
+- Gymnasium (`gymnasium`)
+- Stable-Baselines3 (`stable-baselines3`)
+- NumPy (`numpy`)
+- pandas and Matplotlib (evaluation and plotting)
 
-Install dependencies in a virtual environment:
+Example setup on Linux:
 
 ```bash
 python3 -m venv venv
@@ -95,11 +111,11 @@ python -m pip install --upgrade pip
 python -m pip install mujoco gymnasium stable-baselines3 numpy pandas matplotlib
 ```
 
-MuJoCo's interactive viewer also requires a working graphical/OpenGL environment.
+The interactive MuJoCo viewer requires a working graphics/OpenGL environment.
 
 ## Usage
 
-Run commands from the project directory so that `balance.xml` can be found.
+Run commands from the project directory so `balance.xml` can be found.
 
 ### Check the environment
 
@@ -109,11 +125,38 @@ python test_env.py
 
 ### Train the PPO agent
 
+Train for an additional one million policy steps (the default):
+
 ```bash
 python train.py
 ```
 
-The training script manages model creation or continuation according to its current configuration. Check its settings before starting a long run. The model checkpoint used by the evaluation scripts is named `balance_ppo.zip` by default.
+Or specify the additional training steps:
+
+```bash
+python train.py 500000
+```
+
+`train.py` loads `balance_ppo.zip` if it exists, otherwise creates a new PPO model. When loading an existing model, it uses `reset_num_timesteps=False` to preserve the cumulative training-step counter. It saves the updated model to `balance_ppo.zip` after training. PPO's rollout size may cause the actual number of steps to exceed the requested increment slightly.
+
+**Do not reuse an old policy without considering environment changes.** Changing the action scale from ±45° to ±80°, or changing the termination conditions, changes the learning problem even if observation and action dimensions remain the same. Keep earlier model files for comparison when starting a fresh experiment.
+
+### Run staged training
+
+```bash
+bash train_loop.sh
+```
+
+The updated training-loop workflow is intended to:
+
+1. Read the cumulative `num_timesteps` from an existing `balance_ppo.zip`, or start at zero if no model exists.
+2. Train toward the next **1-million-step boundary** below 10 million cumulative steps.
+3. Train toward the next **10-million-step boundary** at or above 10 million cumulative steps.
+4. Save model backups in `models/` and continue toward a configurable final target (100 million steps in the current script).
+
+Use the **revised** `train_loop.sh` that does not delete the model at startup. An older version of this script explicitly removes `balance_ppo.zip` and the `models/` directory; do not use that version when you want to resume training.
+
+The current `train.py` also has a `CheckpointCallback` configured to save periodic checkpoints in `checkpoints/`. This is separate from the backups created by the training loop.
 
 ### Evaluate a trained model
 
@@ -121,7 +164,19 @@ The training script manages model creation or continuation according to its curr
 python evaluate.py
 ```
 
-This runs evaluation episodes and writes measurements to `evaluation.csv` for subsequent analysis.
+Evaluate 100 episodes:
+
+```bash
+python evaluate.py --episodes 100
+```
+
+Or explicitly name the model:
+
+```bash
+python evaluate.py balance_ppo.zip --episodes 100
+```
+
+Evaluation uses deterministic policy actions in the current workflow and writes per-step results to `evaluation.csv`. Summary statistics include average, maximum, and minimum survival duration, plus the number of episodes that complete 2,000 steps.
 
 ### View the robot in MuJoCo
 
@@ -129,7 +184,7 @@ This runs evaluation episodes and writes measurements to `evaluation.csv` for su
 python evaluate_viewer.py
 ```
 
-The viewer displays the policy controlling the robot. In the current workflow, the viewer can remain open after an episode ends and be closed manually to avoid a shutdown-related segmentation fault observed with immediate automatic teardown on one setup.
+The viewer displays the trained policy controlling the robot. Inspect whether the cylinder actually contacts the ground and whether the robot translates or tips over; the free joint does not enforce continuous ground contact.
 
 ### Generate evaluation plots
 
@@ -137,40 +192,46 @@ The viewer displays the policy controlling the robot. In the current workflow, t
 python plot_evaluation.py
 ```
 
-To plot a specific episode:
+Plot a particular episode:
 
 ```bash
 python plot_evaluation.py --episode 3
 ```
 
-The plotting script reads `evaluation.csv` and saves PNG graphs of joint targets versus actual angles, gravitational torque, reward components, and joint movement. Its default episode selection is episode 10.
+The **1-DOF plotting script** should display available CSV measurements such as roll target versus actual angle, COM Y offset and velocity, roll actuator torque, gravity torque, angular momentum, and reward components. Plots of horizontal travel or upper-body height require those columns to be exported by `evaluate.py`.
 
 ## Project Structure
 
 ```text
 .
-├── balance.xml              # MuJoCo robot model
-├── balance_env.py           # Gymnasium environment and reward function
-├── train.py                 # PPO training
-├── evaluate.py              # Numerical policy evaluation and CSV export
-├── evaluate_viewer.py       # Interactive MuJoCo visualization
-├── plot_evaluation.py       # Evaluation plots
-├── test_env.py              # Basic environment test
-├── balance_ppo.zip          # Trained policy checkpoint (when available)
-├── evaluation.csv           # Generated evaluation data
-└── archive/                 # Optional location for past experiments
+├── balance.xml             # MuJoCo 1-DOF robot model
+├── balance_env.py          # Gymnasium environment, reward, termination
+├── train.py                # PPO training and continuation
+├── train_loop.sh           # Staged training toward cumulative targets
+├── evaluate.py             # Numerical evaluation and CSV export
+├── evaluate_viewer.py      # Interactive MuJoCo visualization
+├── plot_evaluation.py      # Evaluation plots
+├── test_env.py             # Basic environment test
+├── balance_ppo.zip         # Current saved policy, when available
+├── evaluation.csv          # Generated evaluation data
+├── models/                 # Training-loop backups
+├── checkpoints/            # Optional periodic PPO checkpoints
+└── logs/                   # TensorBoard logs, when generated
 ```
 
-Generated checkpoints, CSV files, and PNG plots may not be present until the corresponding scripts have been run.
+Generated models, backups, CSV files, logs, and plots are created as needed and may not exist in a fresh checkout.
 
 ## Current Limitations and Future Work
 
-- Improve the consistency and duration of balance without overfitting to short episodes.
-- Study the relationship between static gravitational balance and dynamic stability.
-- Evaluate policy robustness to variations in initial conditions, mass distribution, and external disturbances.
-- Check whether the simulation's observations, control rates, and actuator behavior can be reproduced on physical hardware.
-- Compare learned control with conventional control approaches when a suitable baseline is available.
+- Improve consistency of long-duration balancing, not just transient survival.
+- Investigate policy saturation at extreme roll position targets.
+- Check whether adding joint velocity, base orientation, and base angular velocity improves observability.
+- Use actual MuJoCo ground contacts rather than a fixed geometric contact-point approximation where appropriate.
+- Monitor cylinder lift-off and horizontal translation during evaluation.
+- Compare 45° and 80° action ranges using separate training runs.
+- Validate the simulation's actuator response, control interval, and sensor assumptions before deploying to hardware.
+- Compare PPO control with a conventional controller under the same initial conditions.
 
 ## Notes
 
-This repository is intended for experimentation and learning. The reward function, physical model, and training configuration may change as experiments progress. Results should be interpreted in the context of the exact model and checkpoint used.
+This repository is intended for experimentation and learning. The model, reward, observations, termination criteria, and training scripts may change between experiments. Interpret results using the exact versions of the environment and checkpoint that produced them.

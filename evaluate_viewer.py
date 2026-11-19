@@ -68,17 +68,14 @@ def main():
 
                 # Print evaluation log every 10 steps
                 if step % 10 == 0:
-                    print(
-                        f"step={step:4d}, "
-                        f"com_x={obs[0]:+.4f}, "
-                        f"com_y={obs[1]:+.4f}, "
-                        f"com_vx={obs[2]:+.4f}, "
-                        f"com_vy={obs[3]:+.4f}, "
-                        f"pitch={obs[4]:+.3f}, "
-                        f"roll={obs[5]:+.3f}, "
-                        f"action={action}, "
-                        f"reward={reward:.4f}"
-                    )
+                  print(
+                      f"step={step:4d}, "
+                      f"com_y={obs[0]:+.4f}, "
+                      f"com_vy={obs[1]:+.4f}, "
+                      f"roll={obs[2]:+.3f}, "
+                      f"action={action}, "
+                      f"reward={reward:.4f}"
+                      )
 
                 # Update viewer
                 viewer.sync()

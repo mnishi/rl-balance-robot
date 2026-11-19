@@ -4,62 +4,82 @@ set -euo pipefail
 
 MODEL="balance_ppo.zip"
 BACKUP_DIR="models"
-
-# Final cumulative training steps (100 million)
 TARGET_STEPS=100000000
 
-# Reset training artifacts
-echo "========================================"
-echo "Resetting training environment"
-echo "========================================"
-
-# Delete the existing model and checkpoints
-rm -f -- "$MODEL"
-rm -rf -- "$BACKUP_DIR"
-
-# Create a new checkpoint directory
 mkdir -p "$BACKUP_DIR"
 
-# Start training from scratch
-TOTAL_STEPS=0
+# Read cumulative training steps from the saved PPO model.
+if [ -f "$MODEL" ]; then
+    TOTAL_STEPS=$(python - "$MODEL" <<'PY'
+import sys
+from stable_baselines3 import PPO
+
+model = PPO.load(sys.argv[1], device="cpu")
+print(model.num_timesteps)
+PY
+)
+else
+    TOTAL_STEPS=0
+fi
+
+echo "========================================"
+echo "Current training steps: $TOTAL_STEPS"
+echo "Target training steps:  $TARGET_STEPS"
+echo "========================================"
 
 while [ "$TOTAL_STEPS" -lt "$TARGET_STEPS" ]; do
 
-    # Use 1M increments until 10M, then 10M increments
+    # Select the checkpoint interval.
     if [ "$TOTAL_STEPS" -lt 10000000 ]; then
-        INCREMENT=1000000
+        INTERVAL=1000000
     else
-        INCREMENT=10000000
+        INTERVAL=10000000
     fi
 
-    # Calculate the next cumulative step count
-    NEXT_STEPS=$((TOTAL_STEPS + INCREMENT))
+    # Calculate the next interval boundary.
+    NEXT_STEPS=$(( (TOTAL_STEPS / INTERVAL + 1) * INTERVAL ))
+
+    # Do not exceed the final target.
+    if [ "$NEXT_STEPS" -gt "$TARGET_STEPS" ]; then
+        NEXT_STEPS=$TARGET_STEPS
+    fi
+
+    INCREMENT=$((NEXT_STEPS - TOTAL_STEPS))
 
     echo "========================================"
     echo "Training: $TOTAL_STEPS -> $NEXT_STEPS"
+    echo "Additional steps: $INCREMENT"
     echo "========================================"
 
-    # Train a new model or continue training the existing model
+    # Continue training from the existing model.
     python train.py "$INCREMENT"
 
-    # Verify that the trained model was saved
     if [ ! -f "$MODEL" ]; then
         echo "Error: Model file not found after training."
         exit 1
     fi
 
-    # Update cumulative training steps
-    TOTAL_STEPS=$NEXT_STEPS
+    # Read the actual saved step count.
+    TOTAL_STEPS=$(python - "$MODEL" <<'PY'
+import sys
+from stable_baselines3 import PPO
 
-    # Save a checkpoint
-    MILLIONS=$((TOTAL_STEPS / 1000000))
-    BACKUP_FILE="$BACKUP_DIR/balance_ppo_${MILLIONS}M.zip"
+model = PPO.load(sys.argv[1], device="cpu")
+print(model.num_timesteps)
+PY
+)
 
+    if [ "$TOTAL_STEPS" -lt "$NEXT_STEPS" ]; then
+        echo "Error: Training did not reach the expected step count."
+        exit 1
+    fi
+
+    # Save a checkpoint using the actual cumulative step count.
+    BACKUP_FILE="$BACKUP_DIR/balance_ppo_${TOTAL_STEPS}.zip"
     cp -- "$MODEL" "$BACKUP_FILE"
 
     echo "Checkpoint saved: $BACKUP_FILE"
     echo
-
 done
 
 echo "========================================"

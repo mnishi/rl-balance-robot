@@ -18,12 +18,9 @@ for i in range(1000):
       print(
           f"step={env.steps}, "
           f"reward={reward:.3f}, "
-          f"com_x={obs[0]:.4f}, "
-          f"com_y={obs[1]:.4f}, "
-          f"com_vx={obs[2]:.4f}, "
-          f"com_vy={obs[3]:.4f}, "
-          f"pitch={obs[4]:.3f}, "
-          f"roll={obs[5]:.3f}"
+          f"com_y={obs[0]:.4f}, "
+          f"com_vy={obs[1]:.4f}, "
+          f"roll={obs[2]:.3f}" 
       )
 
     if terminated or truncated:
