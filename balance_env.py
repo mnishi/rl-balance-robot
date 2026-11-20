@@ -90,6 +90,16 @@ class BalanceEnv(gym.Env):
         # Initial ground-contact body position in world coordinates
         self.initial_ball_xy = None
 
+        # Previous oscillation energy
+        self.prev_osc_energy = None
+        
+        # Oscillation energy scales
+        self.com_position_scale = 0.05
+        self.com_velocity_scale = 0.2
+        
+        # Energy change reward coefficient
+        self.energy_reward_weight = 0.1
+
     def get_contact_point(self):
         # Approximate the cylinder contact point.
         # This assumes the cylinder remains approximately horizontal.
@@ -160,6 +170,16 @@ class BalanceEnv(gym.Env):
         self.steps = 0
         self.prev_com_offset = None
 
+        # Previous oscillation energy
+        self.prev_osc_energy = None
+        
+        # Oscillation energy scales
+        self.com_position_scale = 0.05
+        self.com_velocity_scale = 0.2
+        
+        # Energy change reward coefficient
+        self.energy_reward_weight = 0.1
+
         return self.get_obs(), {}
 
     def step(self, action):
@@ -218,8 +238,33 @@ class BalanceEnv(gym.Env):
             (momentum_magnitude / momentum_scale) ** 2
         )
 
+        # Oscillation energy based on COM offset and velocity
+        com_y = float(obs[0])
+        com_vy = float(obs[1])
+        
+        osc_energy = 0.5 * (
+            (com_y / self.com_position_scale) ** 2
+            + (com_vy / self.com_velocity_scale) ** 2
+        )
+        
+        # Calculate the change in oscillation energy
+        if self.prev_osc_energy is None:
+            energy_change = 0.0
+        else:
+            energy_change = osc_energy - self.prev_osc_energy
+        
+        self.prev_osc_energy = osc_energy
+        
+        # Reward energy reduction and penalize energy increase
+        energy_reward = -self.energy_reward_weight * np.clip(
+            energy_change, -1.0, 1.0
+        )
+        
         # Combined reward
-        reward = torque_reward * momentum_reward
+        reward = (
+            torque_reward * momentum_reward
+            + energy_reward
+        )
 
         # Termination based on COM offset along Y
         com_offset = abs(
@@ -249,7 +294,7 @@ class BalanceEnv(gym.Env):
             com_offset > 0.05
             or foot_up < np.cos(np.deg2rad(80.0))
             or upper_height <= 0.05
-            or travel_distance > 0.03
+            or travel_distance > 0.1
         )       
 
         truncated = bool(

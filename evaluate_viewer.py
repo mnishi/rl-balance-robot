@@ -46,7 +46,14 @@ def main():
             env.model,
             env.data
         ) as viewer:
-
+            # View nearly along the Roll axis (world X axis).
+            # A slight offset makes the cylinder and joint depth visible.
+            with viewer.lock():
+                viewer.cam.type = mujoco.mjtCamera.mjCAMERA_FREE
+                viewer.cam.lookat[:] = env.data.xpos[env.upper_body]
+                viewer.cam.distance = 0.60
+                viewer.cam.azimuth = 75.0
+                viewer.cam.elevation = -15.0   
             step = 0
 
             while viewer.is_running():
